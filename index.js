@@ -556,7 +556,7 @@ class Aipim {
 
 					const signature = this.scope.sign(request.headers[X_AIPIM_CLIENT]);
 
-					console.log('verf', this.scope.verify(request.headers[X_AIPIM_CLIENT], signature));
+					//console.log('verf', this.scope.verify(request.headers[X_AIPIM_CLIENT], signature));
 
 					const endpoint = this.scope.endpoints[this.endpoint];
 
@@ -740,7 +740,7 @@ class Aipim {
 
 		const data = `${this.name}://${client}:${me.key}/${this.version}`;
 
-		console.log(data);
+		//console.log(data);
 
 		return AipimSign(data, me.privateCertificate);
 
