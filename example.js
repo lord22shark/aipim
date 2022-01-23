@@ -21,23 +21,23 @@ const aipim = require('aipim');
 
 		await fandangosAPI.init();
 		
-		fandangosAPI.add('GET', 'url-endpoint', 'application/json', 'application/json', (__input) => {
+		await fandangosAPI.add('GET', 'url-endpoint', 'application/json', 'application/json', () => {
 
-			// Must return a String
+			// Should return something compatible with mime-type
 
-			return JSON.stringify({
-				lore: 'Consequat culpa. Fugiat sunt sit officia dolore id pariatur incididunt consectetur voluptate quis in culpa officia nisi. Adipisicing nulla ea sit minim culpa enim sed eu esse occaecat non qui enim dolor culpa dolore quis laborum proident in cupidatat nostrud veniam irure eiusmod velit duis ut non nisi enim enim dolore quis in ut laborum laboris et sint eu quis veniam ea mollit dolor deserunt dolore proident nisi culpa magna nulla voluptate duis amet in sunt aliquip et culpa sint dolore voluptate quis sed non reprehenderit in ullamco voluptate in pariatur ex cillum aute est aliqua veniam qui sed eiusmod elit dolore ex nulla adipisicing incididunt ad exercitation cillum proident dolore ut aliquip mollit aliquip nulla non non ullamco et ut consectetur reprehenderit laboris ut sunt voluptate cupidatat veniam sint ex est culpa minim voluptate pariatur excepteur sed esse pariatur minim dolore ad ut reprehenderit sunt excepteur veniam do dolor aliquip velit deserunt aute dolore ea ut est amet velit proident dolor aliquip culpa minim quis incididunt dolor ex fugiat occaecat aliquip cillum excepteur ex est tempor in ex nisi ut cupidatat aute quis et in consectetur qui amet laborum consectetur eiusmod ullamco sunt officia eu ullamco sunt culpa proident.'
-			});
+			return {
+				lore: 'Consequat culpa.'
+			};
 
 		});
 
-		fandangosAPI.add('POST', 'another-url-endpoint', 'application/json', 'application/json', (__input) => {
+		await fandangosAPI.add('POST', 'another-url-endpoint', 'application/json', 'application/json', (__input) => {
 
-			// Must return a String
+			// Should return something compatible with mime-type
 
-			return JSON.stringify({
+			return {
 				abc: 1234
-			});
+			};
 
 		});
 
@@ -52,6 +52,9 @@ const aipim = require('aipim');
 
 /**
  * 2) Write a code to invoke "AipimIngress" from the instance configured in step (1)
+ * /usr/local/Cellar/openssl\@1.1/1.1.1k/bin/openssl genrsa -des3 -out path/to/you/pkey
+ * /usr/local/Cellar/openssl\@1.1/1.1.1k/bin/openssl rsa -in aipim.key.pem -outform PEM -pubout -out path/to/you/cert.pub
+ * This key pair os for aipim purpose only - Generate one just for it.
  */ 
 (async () => {
 
@@ -59,8 +62,9 @@ const aipim = require('aipim');
 	const url = 'http://yourdomain/aipim/fandangos/ingress';
 	const privateCertificate = fs.readFileSync('path/to/you/pkey').toString('utf-8');
 	const publicCertificate = fs.readFileSync('path/to/you/cert.pub').toString('utf-8');
+	const passphrase = 's0m3Ran4dom0nPassword!!!';
 
-	const output = aipim.AipimIngress(client, url, privateCertificate, publicCertificate);
+	const output = aipim.AipimIngress(client, url, privateCertificate, publicCertificate, passphrase);
 
 	console.log(output);
 
@@ -88,6 +92,7 @@ const aipim = require('aipim');
 			'X-Aipim-Key': output.key,
 			'X-Aipim-Client': output.name,
 			'X-Aipim': encrypted,
+			'content-type': 'application/json'
 		}
 	});
 
@@ -97,6 +102,7 @@ const aipim = require('aipim');
 			'X-Aipim-Key': output.key,
 			'X-Aipim-Client': output.name,
 			'X-Aipim': encrypted,
+			'content-type': 'application/json'
 		},
 		data: {
 			a: 1,

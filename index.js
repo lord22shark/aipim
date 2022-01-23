@@ -17,6 +17,7 @@ const X_AIPIM = 'x-aipim';
 const X_AIPIM_KEY = 'x-aipim-key';
 const X_AIPIM_CLIENT = 'x-aipim-client';
 const X_AIPIM_SIGNATURE = 'x-aipim-signature';
+const X_CONTENT_TYPE = 'content-type';
 
 const ALGORITHM = 'sha512';
 
@@ -132,10 +133,26 @@ class Aipim {
 				default: null,
 				trim: true		
 			},
+			passphrase: {
+				type: String,
+				required: false,
+				default: '',
+				trim: true		
+			},
 			ip: {
 				type: [String],
 				required: false,
 				default: null
+			},
+			authorized: {
+				type: Boolean,
+				required: true,
+				default: false
+			},
+			scopes: {
+				type: [String],
+				required: false,
+				default: []
 			}
 		});
 
@@ -247,7 +264,7 @@ class Aipim {
 
 				previous[current.endpoint] = current;
 
-				delete previous[current.endpoint].endpoint;
+				//delete previous[current.endpoint].endpoint;
 
 				return previous;
 
@@ -298,12 +315,6 @@ class Aipim {
 
 		}
 
-		if (this.clients.hasOwnProperty(__client)) {
-
-			throw new Error(`${__client} is already here? Are you really it?`);
-
-		}
-
 		const key = uuidv4();
 
 		const input = {
@@ -311,7 +322,9 @@ class Aipim {
 			key: key,
 			privateCertificate: __privateCertificate,
 			publicCertificate: __publicCertificate,
-			ip: __ip
+			ip: __ip,
+			scopes: [],
+			authorized: false
 		};
 
 		this.data.client.push(input);
@@ -335,7 +348,7 @@ class Aipim {
 	}
 
 	/**
-	 * TODO: add input and output mimetype
+	 *
 	 */
 	async add (__verb, __endpoint, __accept, __mimetype, __handler) {
 
@@ -392,7 +405,7 @@ class Aipim {
 
 				this.endpoints[__endpoint] = JSON.parse(JSON.stringify(input));
 
-				delete this.endpoints[__endpoint].endpoint;
+				//delete this.endpoints[__endpoint].endpoint;
 
 			} catch (mongooseError) {
 
@@ -408,23 +421,34 @@ class Aipim {
 			
 			const verb = __verb.trim().toLowerCase();
 
-			if (verb === 'get') {
+			const binder = {
+				scope: this,
+				handler: __handler,
+				endpoint: this.endpoints[__endpoint]
+			};
 
-				this.express.get(uri, [
-					this.isValid.bind(this), // TODO LATER BIND
-					this.middlewareGet.bind({scope:this, handler: __handler, endpoint: __endpoint})
-				]);
+			const aipimVerbHandler = this[verb.toUpperCase()].bind(binder);
 
-			} else if (verb === 'post') {
+			const responseHandlers = [
+				this.isValid.bind(binder),
+				aipimVerbHandler
+			];
 
-				this.express.get(uri, [
-					this.isValid.bind(this), // TODO LATER BIND
-					this.middlewarePost.bind({scope:this, handler: __handler, endpoint: __endpoint})
-				])
+			// why this.express[verb] does not work?
+
+			switch (verb) {
+
+				case 'get':
+					this.express.get(uri, responseHandlers);
+				return;
+
+				case 'post':
+					this.express.post(uri, responseHandlers);
+				return;
 
 			}
 
-			// ADD get /signature with api IO function.explain = controller.get(....)
+			// ADD get /signature with api IO function.explain = controller.get(....)*/
 
 		} catch (error) {
 
@@ -439,17 +463,34 @@ class Aipim {
 	 */ 
 	isValid (request, response, next) {
 
-		if (!this.clients) {
+		if (!this.scope.clients) {
 
 			response.status(500).json({
 				error: 'Cannot validate - Aipim.clients is not initialized!'
 			});
+
+			return;
 		
 		} else {
 
-			if (request.headers.hasOwnProperty(X_AIPIM) && (request.headers[X_AIPIM]) && request.headers.hasOwnProperty(X_AIPIM_KEY) && (request.headers[X_AIPIM_KEY]) && request.headers.hasOwnProperty(X_AIPIM_CLIENT) && (request.headers[X_AIPIM_CLIENT])) {
+			const headersValidation = [
+				request.headers.hasOwnProperty(X_AIPIM),
+				request.headers[X_AIPIM],
+				request.headers.hasOwnProperty(X_AIPIM_KEY),
+				request.headers[X_AIPIM_KEY],
+				request.headers.hasOwnProperty(X_AIPIM_CLIENT),
+				request.headers[X_AIPIM_CLIENT],
+				request.headers.hasOwnProperty(X_CONTENT_TYPE),
+				request.headers[X_CONTENT_TYPE]
+			].reduce((previous, current) => {
 
-				const me = this.clients[request.headers[X_AIPIM_CLIENT]];
+				return previous && !!current;
+
+			}, true);
+
+			if (headersValidation) {
+
+				const me = this.scope.clients[request.headers[X_AIPIM_CLIENT]];
 
 				if (!me) {
 
@@ -457,41 +498,71 @@ class Aipim {
 						error: 'You ain\'t a client...'
 					});
 
+					return;
+
 				} else {
 
-					if (me.key === request.headers[X_AIPIM_KEY]) {
+					if (me.authorized === true) {
 
-						try {
+						if (this.endpoint.input === request.headers[X_CONTENT_TYPE]) {
 
-							const decrypted = this.decrypt(request.headers[X_AIPIM_CLIENT], request.headers[X_AIPIM]);
+							if (me.key === request.headers[X_AIPIM_KEY]) {
 
-							if (me.key === decrypted) {
+								try {
 
-								next();
+									const decrypted = this.scope.decrypt(request.headers[X_AIPIM_CLIENT], request.headers[X_AIPIM]);
 
-								// TODO: validate input mimetype
+									if (me.key === decrypted) {
+
+										next();
+
+									} else {
+
+										response.status(401).json({
+											error: 'Whose cloak is this?!'
+										});
+
+										return;
+
+									}
+
+								} catch (dError) {
+
+									response.status(500).json({
+										error: dError.toString()
+									});
+
+									return;
+
+								}
 
 							} else {
 
 								response.status(401).json({
-									error: 'Whose cloak is this?!'
+									error: 'You ain\'t you!'
 								});
+
+								return;
 
 							}
 
-						} catch (dError) {
+						} else {
 
-							response.status(500).json({
-								error: dError.toString()
+							response.status(400).json({
+								error: `We need a ${this.endpoint.input} content-type header`
 							});
+
+							return;
 
 						}
 
 					} else {
 
 						response.status(401).json({
-							error: 'You ain\'t you!'
+							error: `You ain't authorized yet!`
 						});
+
+						return;
 
 					}
 
@@ -500,8 +571,10 @@ class Aipim {
 			} else {
 
 				response.status(400).json({
-					error: 'Missing 3 headers, my dear!'
+					error: 'Missing 4 headers, my dear!'
 				});
+
+				return;
 
 			}
 
@@ -512,7 +585,7 @@ class Aipim {
 	/**
 	 * 
 	 */
-	async middlewareGet (request, response) {
+	async GET (request, response) {
 
 		let output = null;
 
@@ -521,6 +594,8 @@ class Aipim {
 			response.status(500).json({
 				error: 'Handler does not exist or is not a function'
 			});
+
+			return;
 
 		}
 
@@ -534,21 +609,27 @@ class Aipim {
 				error: handlerError.toString()
 			});
 
+			return;
+
 		}
 
-		if (output === null) {
+		if ((output === null) || (output === undefined)) {
 
 			response.status(403).json({
-				error: 'Output is null, maybe an internal error in API method?'
+				error: 'Output is null or undefined, maybe an internal error in API method?'
 			});
+
+			return;
 
 		} else {
 
-			if (typeof(output) !== 'string') {
+			if (typeof(output) !== 'object') {
 
 				response.status(500).json({
-					error: 'Output is not a string - please call the programmer and report that output is not a string'
+					error: 'Output is not an object to be stringified - please call the programmer and report that output is not a string'
 				});
+
+				return;
 
 			} else {
 
@@ -558,15 +639,40 @@ class Aipim {
 
 					//console.log('verf', this.scope.verify(request.headers[X_AIPIM_CLIENT], signature));
 
-					const endpoint = this.scope.endpoints[this.endpoint];
+					if (this.endpoint.output === 'application/json') {
 
-					response.status(200).setHeader('content-type', endpoint.output).setHeader(X_AIPIM_SIGNATURE, signature).send(output);
+						output = JSON.stringify(output);
+
+					}
+
+					try {
+
+						//output = this.scope.encrypt(request.headers[X_AIPIM_CLIENT], output); :-( buaaaa! - This remains here for when I can encrypt data
+						// Error: error:0409A06E:rsa routines:RSA_padding_add_PKCS1_OAEP_mgf1:data too large for key size
+
+						response.status(200).setHeader('content-type', this.endpoint.output).setHeader(X_AIPIM_SIGNATURE, signature).send(output);
+
+						return;
+
+					} catch (encryptError) {
+
+						console.log(encryptError);
+
+						response.status(500).json({
+							error: encryptError.toString()
+						});
+
+						return;
+
+					}
 
 				} catch (encryptError) {
 
 					response.status(500).json({
 						error: encryptError.toString()
 					});
+
+					return;
 
 				}
 
@@ -579,7 +685,7 @@ class Aipim {
 	/**
 	 * 
 	 */
-	async middlewarePost (request, response) {
+	async POST (request, response) {
 
 		if ((!this.handler) || (!(this.handler instanceof Function))) {
 
@@ -587,13 +693,17 @@ class Aipim {
 				error: 'Handler does not exist or is not a function'
 			});
 
+			return;
+
 		}
 
-		if (typeof(request.body) !== 'string') {
+		if ((!request.body) || (request.body.length === 0)) {
 
 			response.status(403).json({
-				error: 'Your body is not a string - and it should be encrypted with you public certificate'
+				error: 'Your body empty. Posting nothing?!'
 			});
+
+			return;
 
 		}
 
@@ -607,19 +717,41 @@ class Aipim {
 
 		} catch (decryptError) {
 
-			response.status(200).json({
+			response.status(500).json({
 				error: decryptError.toString()
 			});
 
+			return;
+
 		}
 
-		if (input === null) {
+		if ((input === null) || (input === undefined)) {
 
 			response.status(403).json({
 				error: 'Cannot invoke API due to null input - maybe failed to decrypt?!'
 			});
 
+			return;
+
 		} else {
+
+			if (this.endpoint.input === 'application/json') {
+
+				try {
+
+					input = JSON.parse(input);
+
+				} catch (parseError) {
+					
+					response.status(500).json({
+						error: parseError.toString()
+					});
+
+					return;
+
+				}
+
+			}
 
 			let output = null;
 
@@ -633,6 +765,8 @@ class Aipim {
 					error: handlerError.toString()
 				});
 
+				return;
+
 			}
 
 			if (output === null) {
@@ -641,29 +775,34 @@ class Aipim {
 					error: 'Output is null, maybe an internal error in API method?'
 				});
 
+				return;
+
 			} else {
 
-				if (typeof(output) !== 'string') {
+				if (this.endpoint.output === 'application/json') {
+
+					output = JSON.stringify(output);
+
+				}
+
+				try {
+
+					const signature = this.scope.sign(request.headers[X_AIPIM_CLIENT]);
+
+					//output = this.scope.encrypt(request.headers[X_AIPIM_CLIENT], output); :-( buaaaa! - This remains here for when I can encrypt data
+					// Error: error:0409A06E:rsa routines:RSA_padding_add_PKCS1_OAEP_mgf1:data too large for key size
+
+					response.status(200).setHeader('content-type', this.endpoint.output).setHeader(X_AIPIM_SIGNATURE, signature).send(output);
+
+					return;
+
+				} catch (encryptError) {
 
 					response.status(500).json({
-						error: 'Output is not a string - please call the programmer and report that output is not a string'
+						error: encryptError.toString()
 					});
 
-				} else {
-
-					try {
-
-						output = this.scope.encrypt(request.headers[X_AIPIM_CLIENT], output);
-
-						response.status(200).setHeader('content-type', 'text/plain').send(output);
-
-					} catch (encryptError) {
-
-						response.status(200).json({
-							error: encryptError.toString()
-						});
-
-					}
+					return;
 
 				}
 
@@ -715,7 +854,7 @@ class Aipim {
 
 		}
 
-		return AipimDecrypt(data, me.privateCertificate);
+		return AipimDecrypt(data, me.privateCertificate, me.passphrase);
 
 	}
 
@@ -742,7 +881,7 @@ class Aipim {
 
 		//console.log(data);
 
-		return AipimSign(data, me.privateCertificate);
+		return AipimSign(data, me.privateCertificate, me.passphrase);
 
 	}
 
@@ -805,17 +944,17 @@ const AipimEncrypt = (data, publicCertificate) => {
 /**
  * 
  */
-const AipimDecrypt = (data, privateCertificate) => {
+const AipimDecrypt = (data, privateCertificate, passphrase) => {
 
 	if ((!data) || (!privateCertificate)) {
 
-		throw new Error('Data and Private Certificate must be set!');
+		throw new Error('Data, Private Certificate must be set! Passphrase is optional.');
 
 	}
 
-	if ((typeof(data) !== 'string') || (typeof(privateCertificate) !== 'string')) {
+	if ((typeof(data) !== 'string') || (typeof(privateCertificate) !== 'string') || (typeof(passphrase) !== 'string')) {
 
-		throw new Error('Data and Private Certificate must be string!');
+		throw new Error('Data, Private Certificate and Passphrase must be string!');
 
 	}
 
@@ -824,7 +963,8 @@ const AipimDecrypt = (data, privateCertificate) => {
 	const decrypted = crypto.privateDecrypt({
 		key: privateCertificate,
 		oaepHash: ALGORITHM,
-		padding: crypto.constants.RSA_PKCS1_OAEP_PADDING
+		padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+		passphrase: passphrase
 	}, buffer);
 
 	return decrypted.toString('utf-8');
@@ -834,15 +974,15 @@ const AipimDecrypt = (data, privateCertificate) => {
 /**
  * 
  */
-const AipimSign = (data, privateCertificate) => {
+const AipimSign = (data, privateCertificate, passphrase) => {
 
 	if ((!data) || (!privateCertificate)) {
 
-		throw new Error('Data and Private Certificate must be set!');
+		throw new Error('Data and Private Certificate must be set! Passphrase is optional.');
 
 	}
 
-	if ((typeof(data) !== 'string') || (typeof(privateCertificate) !== 'string')) {
+	if ((typeof(data) !== 'string') || (typeof(privateCertificate) !== 'string') || (typeof(passphrase) !== 'string')) {
 
 		throw new Error('Data and Private Certificate must be string!');
 
@@ -851,6 +991,7 @@ const AipimSign = (data, privateCertificate) => {
 	const signature = crypto.sign(ALGORITHM, Buffer.from(data), {
 		key: privateCertificate,
 		padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+		passphrase: passphrase
 	});
 
 	return signature.toString('base64');
@@ -884,7 +1025,7 @@ const AipimVerify = (data, signature, publicCertificate) => {
 /**
  * 
  */
-const AipimIngress = (client, url, privateCertificate, publicCertificate, ip) => {
+const AipimIngress = async (client, url, privateCertificate, publicCertificate, ip, passphrase) => {
 
 	if ((!client) || (typeof(client) !== 'string')) {
 
@@ -916,38 +1057,49 @@ const AipimIngress = (client, url, privateCertificate, publicCertificate, ip) =>
 
 	}
 
-	Axios({
-		url: url,
-		method: 'POST',
-		headers: {
-			'Content-type': 'application/json'
-		},
-		data: {
-			client: client,
-			privateCertificate: privateCertificate,
-			publicCertificate: publicCertificate,
-			ip: ip
-		}
-	}).then((response) => {
+	try {
+
+		const response = await Axios({
+			url: url,
+			method: 'POST',
+			headers: {
+				'Content-type': 'application/json'
+			},
+			data: {
+				client: client,
+				privateCertificate: privateCertificate,
+				publicCertificate: publicCertificate,
+				ip: ip,
+				passphrase: passphrase || ''
+			}
+		});
 
 		console.log('[AIPIMIngress::SUCCESS] ----------------------------------------------');
 		console.log(response.status);
 		console.log(response.data);
 		console.log('[AIPIMIngress::SUCCESS] ----------------------------------------------');
 
-	}).catch((error) => {
+		return response.data;
+
+	} catch (requestError) {
 
 		console.log('[AIPIMIngress::ERROR] ----------------------------------------------');
-		console.log(error.response.status);
-		console.log(error.response.data);
+		console.log(requestError.response.data);
 		console.log('[AIPIMIngress::ERROR] ----------------------------------------------');
+		
+		return requestError.response.data;
 
-	}).finally(() => {
-
-		process.exit(0);
-
-	});
+	}
 
 };
 
-module.exports = {Aipim, AipimEncrypt, AipimDecrypt, AipimIngress};
+/**
+ * 
+ */ 
+const AipimNoRouteHandler = async () => {
+
+	// TODO
+
+};
+
+module.exports = {Aipim, AipimEncrypt, AipimDecrypt, AipimIngress, AipimNoRouteHandler};
