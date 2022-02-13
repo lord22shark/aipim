@@ -430,6 +430,7 @@ class Aipim {
 			const aipimVerbHandler = this[verb.toUpperCase()].bind(binder);
 
 			const responseHandlers = [
+				jsonParser,
 				this.isValid.bind(binder),
 				aipimVerbHandler
 			];
@@ -697,7 +698,7 @@ class Aipim {
 
 		}
 
-		if ((!request.body) || (request.body.length === 0)) {
+		if (!request.body) {
 
 			response.status(403).json({
 				error: 'Your body empty. Posting nothing?!'
@@ -707,109 +708,64 @@ class Aipim {
 
 		}
 
-		let input = null;
+		let input = request.body;
+
+		// REMEMBER TO THINK ABOUT THIS CONSIDERING jsonParser :: if (this.endpoint.input === 'application/json')
+
+		let output = null;
 
 		try {
 
-			const key = this.scope.clients[request.headers[X_AIPIM_CLIENT]].privateCertificate;
+			output = await this.handler(input);
 
-			input = this.scope.decrypt(key, request.body);
+		} catch (handlerError) {
 
-		} catch (decryptError) {
-
-			response.status(500).json({
-				error: decryptError.toString()
+			response.status(handlerError.code || 500).json({
+				error: handlerError.toString()
 			});
 
 			return;
 
 		}
 
-		if ((input === null) || (input === undefined)) {
+		if (output === null) {
 
 			response.status(403).json({
-				error: 'Cannot invoke API due to null input - maybe failed to decrypt?!'
+				error: 'Output is null, maybe an internal error in API method?'
 			});
 
 			return;
 
 		} else {
 
-			if (this.endpoint.input === 'application/json') {
+			if (this.endpoint.output === 'application/json') {
 
-				try {
-
-					input = JSON.parse(input);
-
-				} catch (parseError) {
-					
-					response.status(500).json({
-						error: parseError.toString()
-					});
-
-					return;
-
-				}
+				output = JSON.stringify(output);
 
 			}
-
-			let output = null;
 
 			try {
 
-				output = await this.handler(input);
+				const signature = this.scope.sign(request.headers[X_AIPIM_CLIENT]);
 
-			} catch (handlerError) {
+				//output = this.scope.encrypt(request.headers[X_AIPIM_CLIENT], output); :-( buaaaa! - This remains here for when I can encrypt data
+				// Error: error:0409A06E:rsa routines:RSA_padding_add_PKCS1_OAEP_mgf1:data too large for key size
 
-				response.status(500).json({
-					error: handlerError.toString()
-				});
-
-				return;
-
-			}
-
-			if (output === null) {
-
-				response.status(403).json({
-					error: 'Output is null, maybe an internal error in API method?'
-				});
+				response.status(200).setHeader('content-type', this.endpoint.output).setHeader(X_AIPIM_SIGNATURE, signature).send(output);
 
 				return;
 
-			} else {
+			} catch (encryptError) {
 
-				if (this.endpoint.output === 'application/json') {
+				response.status(encryptError.code || 500).json({
+					error: encryptError.toString()
+				});
 
-					output = JSON.stringify(output);
-
-				}
-
-				try {
-
-					const signature = this.scope.sign(request.headers[X_AIPIM_CLIENT]);
-
-					//output = this.scope.encrypt(request.headers[X_AIPIM_CLIENT], output); :-( buaaaa! - This remains here for when I can encrypt data
-					// Error: error:0409A06E:rsa routines:RSA_padding_add_PKCS1_OAEP_mgf1:data too large for key size
-
-					response.status(200).setHeader('content-type', this.endpoint.output).setHeader(X_AIPIM_SIGNATURE, signature).send(output);
-
-					return;
-
-				} catch (encryptError) {
-
-					response.status(500).json({
-						error: encryptError.toString()
-					});
-
-					return;
-
-				}
+				return;
 
 			}
 
 		}
-
 	} 
 
 	/**
