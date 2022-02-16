@@ -218,7 +218,7 @@ class Aipim {
 
 				try {
 
-					const output = await this.ingress(input.client, input.privateCertificate, input.publicCertificate, input.ip);
+					const output = await this.ingress(input.client, input.privateCertificate, input.publicCertificate, input.ip, input.passphrase);
 
 					response.status(200).json(output);
 
@@ -283,7 +283,7 @@ class Aipim {
 	/**
 	 * 
 	 */ 
-	async ingress (__client, __privateCertificate, __publicCertificate, __ip) {
+	async ingress (__client, __privateCertificate, __publicCertificate, __ip, __passphrase) {
 
 		if ((!__client) || (typeof(__client) !== 'string')) {
 
@@ -324,7 +324,8 @@ class Aipim {
 			publicCertificate: __publicCertificate,
 			ip: __ip,
 			scopes: [],
-			authorized: false
+			authorized: false,
+			passphrase: __passphrase || null
 		};
 
 		this.data.client.push(input);
@@ -1040,10 +1041,10 @@ const AipimIngress = async (client, url, privateCertificate, publicCertificate, 
 	} catch (requestError) {
 
 		console.log('[AIPIMIngress::ERROR] ----------------------------------------------');
-		console.log(requestError.response.data);
+		console.log(requestError.response?.data || requestError.toString());
 		console.log('[AIPIMIngress::ERROR] ----------------------------------------------');
 		
-		return requestError.response.data;
+		return requestError;
 
 	}
 
