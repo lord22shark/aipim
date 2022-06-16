@@ -1,6 +1,6 @@
 {
   "name": "aipim",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "ExpressJS API Manager with Certificates",
   "main": "index.js",
   "repository": "https://github.com/lord22shark/aipim",
